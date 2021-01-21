@@ -37,7 +37,7 @@ def bucle_programa(miBot):
 def main():
     TokenBot = 'XXXXXXXXX:YYYYYYYYYYYYYYYYYYYYYYYYY'
     Canal_ID = 'CCCCCCCCCCCCCCC'
-    Bot=uPYbot.uBot(TokenBot,'api.telegram.org', Canal_ID, evento_recepcion, bucle_programa)
+    Bot=uPYbot.uBot(TokenBot,'api.telegram.org', evento_recepcion, bucle_programa)
     Bot.send_message(Canal_ID,'Se ha iniciado programa')
     z=Bot.inicia()
 
