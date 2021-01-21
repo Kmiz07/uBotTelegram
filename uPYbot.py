@@ -1,9 +1,8 @@
 import network,gc,utime,ujson,machine
 import usocket as socket
-import ussl,ure
+import ussl,ure,uerrno
 import ubinascii
 import uos
-import uasyncio as asyncio
 import utime
 from machine import Pin
 from utime import sleep
@@ -13,7 +12,7 @@ class uBot():
         self.resetear=True
             
     def usock_ssl(self):
-#         inicia un socket ssl
+#         inicia un socket ssl. si todo va bien retorna el socket, sino retorna None
         if network.WLAN(network.STA_IF).isconnected():
             addr = socket.getaddrinfo(self.host, 443)[0][-1]
             s0 = socket.socket()
@@ -25,23 +24,24 @@ class uBot():
         else:
             return None
     
-    def __init__(self,token , host, canal, funcion, bucle):
-#         inicia un bot
+    def __init__(self,token , host,   funcion, bucle):
+#         inicia un bot. precisa el token de telegram  y dos funciones
+#         la funcion 'funcion' es la que sera llamada cuando se reciban datos
+#         la funcion bucle es llamada a cada ciclo de lectura de datos, por lo que sera usada a modo de loop de programa
         self.token = token
         self.host = host
-        self.canal = canal
         self.datos_recibidos = ''
         self.funcion = funcion
         self.id_update = 0
         self.usock = self.usock_ssl()
-        self.timeout = 120
+        self.timeout = 50
         self.limit = 1
         self.bucle = bucle
         self.puntero_tiempo = utime.time()
         self.resetear = False
 
     def send_message(self,id_canal,mensaje):
-#         envia mensaje de texto al canal elegido
+#         envia mensaje de texto al canal/usuario elegido
         peticion = b'GET /bot%s/sendMessage?chat_id=%s&parse_mode=HTML&text=%s HTTP/1.1\r\nHost: api.telegram.org\r\n\r\n' %(self.token, id_canal, mensaje)      
         self.usock.write(peticion)
         data = self.usock.read()
@@ -50,7 +50,7 @@ class uBot():
             bufer += data
             data = self.usock.read()
         return bufer
-    
+     
     def procesa_entrada(self,bufer_de_entrada):
 #         procesa la cabecera y retorna el json de la respuesta de servidor
         separa_por_lineas = ure.compile('[\r\n]')
@@ -87,7 +87,12 @@ class uBot():
                     esperando_update=True#Ahora si esta esperando update
                 except OSError as exc:
                     print(exc.args[0])
-                    print('error enviando peticion')   
+                    print('error enviando peticion')
+                    self.usock = self.usock_ssl()
+                    esperando_update = False
+                    print('------------------------------------------------------------------error de envio--------------------------------------------------------------')
+                    self.usock.write(peticion)
+ 
             try:
                 data = self.usock.readline()
                 bufer = b''
@@ -98,16 +103,13 @@ class uBot():
                     data = self.usock.readline()
                 if bufer != b'':
                     mensaje_util = self.procesa_entrada(bufer)
-                    print('-------------------respuesta------------------------')
+                    print('-------------------respuesta------------------------',utime.time())
                     print(mensaje_util)
                     print('--------------------------------------------------')
                     bufer = mensaje_util
             except OSError as exc:
-                print(exc.args[0])
                 print('error recibiendo datos')
-                machine.reset()
-                break
-            
+                machine.reset()            
             if bufer != b'' and bufer != None:
                 try:
                     retorno = self.obj_msg(ujson.loads(bufer))
@@ -115,12 +117,18 @@ class uBot():
                     print('fallo en json')
                     retorno.vacio = True
                 esperando_update= False
-                if retorno.vacio == False:                    
-                    self.id_update = retorno.indice + self.limit
+                if retorno.vacio == False:
+                    print(retorno.vacio)
+                    print(retorno.indice)
+                    if retorno.indice != 0:
+                        self.id_update = retorno.indice + self.limit
                     self.funcion(retorno, self)#llama al evento de recepcion de datos
-            if utime.time() - 130 > self.puntero_tiempo:#si se desbordo oftime.... se resetea el chip(por desarrollar este punto)
-                print('reseteaaaaaaaaaaannnnnnnnndddddddoooooooooo')
-                machine.reset()
+            if utime.time() - 55 > self.puntero_tiempo:#si se desbordo oftime.... se resetea el chip(por desarrollar este punto)
+                self.usock = self.usock_ssl()
+                esperando_update = False
+                print('----------------------------------------------------------------------timeout-------------------------------------------------------------------------')
+
+
             self.bucle(self)
             
     class mensaje():
@@ -140,7 +148,6 @@ class uBot():
             mensaje.ok = True
             try:
                 if z['result'] != []:
-#                     print('update_id: ','update_id' in z['result'][0])
                     mensaje.vacio = False
                     mensaje.indice = z['result'][0]['update_id']
                     mensaje.remite = z['result'][0]['message']['from']['username']
@@ -154,9 +161,7 @@ class uBot():
                     else:
                         mensaje.chat_titulo = ''
                 
-                    if 'update_id' in z['result'][0] == False:                        
-                        print('\r\nes falso\r\n')
-                        mensaje.vacio = True
+                    if 'update_id' in z['result'][0] == False: mensaje.vacio = True
                         
                 else:
                     mensaje.vacio = True
@@ -165,7 +170,7 @@ class uBot():
         else:
             mensaje.ok = False
         return mensaje
-    
+
     def envia_archivo_multipart(self,canal_id,arch,comando,nombre,comentario=''):
         limite = ubinascii.hexlify(uos.urandom(16)).decode('ascii')
         cadenados = b'--'
